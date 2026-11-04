@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <thread>
 #include <chrono>
+#include <atomic>
 #include "log.hpp"
 #include "socket.hpp"
 #include <string>
@@ -12,54 +13,72 @@
 #define IP_ADDRESS "127.0.0.1"  // Het loopback-adres verwijst naar deze computer.
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
-    // Toon informatie over de client en de build.
     std::cout << "TCP Client!\n";
-    std::cout << __DATE__ << " " << __TIME__ << std::endl; // log date and time of compilation, not runtime
+    std::cout << __DATE__ << " " << __TIME__ << std::endl;
     LogTargetOperatingSystem();
     LogTargetCompiler();
 
 #ifdef _WIN32
-    // Initialiseer Winsock voordat sockets op Windows worden gebruikt.
     WSADATA wsaData;
     (void)WSAStartup(MAKEWORD(2, 2), &wsaData);
 #endif
-
-    // Maak een IPv4-socket die TCP gebruikt.
+    // socket aanmaken
     SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == INVALID_SOCKET) {
         std::cerr << "Cannot create socket\n";
         throw std::runtime_error("Cannot create socket");
         return 1;
     }
-
-    // Stel het IPv4-adres en de poort van de server in.
+    // socket adress instellen
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORT); // Zet de poort om naar netwerk-bytevolgorde.
+    addr.sin_port = htons(PORT);
     int result = inet_pton(AF_INET, IP_ADDRESS, &addr.sin_addr);
     if (result <= 0) {
         std::cerr << "Invalid address\n";
         throw std::runtime_error("Invalid address");
         return 1;
     }
-
-    // Maak verbinding met de server op het ingestelde adres en de ingestelde poort.
+    // connecten met de server
     if (connect(sock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
         throw std::runtime_error("connect failed");
         std::cerr << "connect failed\n";
         return 1;
     }
+
+    // Tijdstip (in microseconden) waarop het laatste bericht is verstuurd.
+    std::atomic<long long> sendTimeUs{ 0 };
+
     // Deze thread blijft ontvangen terwijl de hoofdthread invoer leest en verstuurt.
-    std::thread receiverThread([sock]() {
+    std::thread receiverThread([sock, &sendTimeUs]() {
         char buffer[BUF_SIZE];
         int bytes = 0;
 
-        while ((bytes = recv(sock, buffer, sizeof(buffer), 0)) > 0) {
-            std::cout << "\nserver: ";
-            std::string comfromatiebericht = "Ontvangen bericht op client:" + std::string(buffer);
-            send(sock, comfromatiebericht.c_str(), static_cast<int>(comfromatiebericht.size()), 0);
-            std::cout.write(buffer, bytes);
-            std::cout << '\n';
+        while ((bytes = recv(sock, buffer, sizeof(buffer) - 1, 0)) > 0) {
+            const auto receiveTime = std::chrono::steady_clock::now();
+            buffer[bytes] = '\0';
+            std::string message(buffer);
+
+            std::cout << "\nserver: " << message << '\n';
+
+            // Is dit de confirmatie van de server? Dan meten we de delay.
+            if (message.rfind("Ontvangen bericht op server", 0) == 0) {
+                const long long nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                    receiveTime.time_since_epoch()).count();
+                const double delayMs = (nowUs - sendTimeUs.load()) / 1000.0;
+                std::cout << "Delay (heen en terug): " << delayMs << " ms\n";
+            }
+            if (message.rfind("Ontvangen bericht op server", 0) == 0) {
+                const long long nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                    receiveTime.time_since_epoch()).count();
+                const double delayMs = (nowUs - sendTimeUs.load()) / 1000.0;
+                std::cout << "Delay (heen en terug): " << delayMs << " ms\n";
+            }
+            else {
+                // Gewoon bericht van de server: stuur een confirmatie terug.
+                std::string confirmation = "Ontvangen bericht op client: " + message;
+                send(sock, confirmation.c_str(), static_cast<int>(confirmation.size()), 0);
+            }
         }
 
         if (bytes == SOCKET_ERROR) {
@@ -69,29 +88,22 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 
     // De hoofdthread leest berichten van de gebruiker en verstuurt ze.
     std::string outgoingMessage;
-    std::chrono::steady_clock::time_point previousSendTime;
-    bool hasPreviousMessage = false;
     while (true) {
         std::cout << "Bericht (typ stop om te stoppen):\n";
         if (!std::getline(std::cin, outgoingMessage) || outgoingMessage == "stop") {
             break;
         }
 
+        // Start de klok vlak voor het versturen.
+        sendTimeUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+
         if (send(sock, outgoingMessage.c_str(), static_cast<int>(outgoingMessage.size()), 0) == SOCKET_ERROR) {
             std::cerr << "Fout bij versturen naar de server.\n";
             break;
         }
-
-        const auto sendTime = std::chrono::steady_clock::now();
-        if (hasPreviousMessage) {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(sendTime - previousSendTime);
-            std::cout << "Tijd sinds vorig verzonden bericht: " << elapsed.count() << " ms\n";
-        }
-        previousSendTime = sendTime;
-        hasPreviousMessage = true;
     }
 
-    // Stop beide socketrichtingen zodat recv() in de receiver-thread wordt vrijgegeven.
 #ifdef _WIN32
     (void)shutdown(sock, SD_BOTH);
 #else
@@ -99,15 +111,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 #endif
     receiverThread.join();
 
-    // Sluit de socket nadat de communicatie klaar is.
     closeSocket(sock);
     std::cout << "Socket gesloten.\n";
 
 #ifdef _WIN32
-    // Ruim Winsock op wanneer het programma op Windows draait.
     (void)WSACleanup();
 #endif
 
-    // Geef aan dat het programma succesvol is afgerond.
     return 0;
 }

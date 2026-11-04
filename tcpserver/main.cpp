@@ -56,7 +56,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         return 1;
     }
 
-    // Wacht op Ã©Ã©n client en maak daarvoor een aparte socket.
+    // Wacht op één client en maak daarvoor een aparte socket.
     SOCKET clientSock = accept(serverSock, nullptr, nullptr);
     if (clientSock == INVALID_SOCKET) {
         std::cerr << "accept error!\n";
@@ -66,14 +66,16 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 
     std::atomic<bool> running = true;
 
+    // Tijdstip (in microseconden) waarop het laatste bericht naar de client is verstuurd.
+    std::atomic<long long> sendTimeUs{ 0 };
+
     // Deze thread ontvangt berichten van de client.
     std::thread receiver([&]() {
         char buffer[BUF_SIZE];
-        std::chrono::steady_clock::time_point previousSendTime{};
-        bool hasPreviousSend = false;
 
         while (running) {
             int bytes = recv(clientSock, buffer, sizeof(buffer) - 1, 0);
+            const auto receiveTime = std::chrono::steady_clock::now();
             if (bytes <= 0) {
                 std::cout << "De client heeft de verbinding gesloten.\n";
                 running = false;
@@ -82,20 +84,23 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 
             buffer[bytes] = '\0';
             buffer[strcspn(buffer, "\r\n")] = '\0';
+
+            // Is dit de confirmatie van de client op een bericht van de server? Dan meten we de delay.
+            if (std::string(buffer).rfind("Ontvangen bericht op client", 0) == 0) {
+                const long long nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                    receiveTime.time_since_epoch()).count();
+                const double delayMs = (nowUs - sendTimeUs.load()) / 1000.0;
+                std::cout << "\nDelay (heen en terug): " << delayMs << " ms\n";
+                continue; // een confirmatie bevestigen we niet opnieuw
+            }
+
             std::cout << "Client: " << buffer << '\n';
-            const auto sendTime = std::chrono::steady_clock::now();
-            const auto delayMs = hasPreviousSend
-                ? std::chrono::duration_cast<std::chrono::milliseconds>(sendTime - previousSendTime).count()
-                : 0;
-            std::string comfromatiebericht = "Ontvangen bericht op server: " + std::string(buffer)
-                + " (" + std::to_string(delayMs) + " ms)";
+            std::string comfromatiebericht = "Ontvangen bericht op server: " + std::string(buffer);
             if (send(clientSock, comfromatiebericht.c_str(), static_cast<int>(comfromatiebericht.size()), 0) == SOCKET_ERROR) {
                 std::cerr << "send error!\n";
                 running = false;
                 break;
             }
-            previousSendTime = sendTime;
-            hasPreviousSend = true;
 
             if (strcmp(buffer, "stop") == 0) {
                 running = false;
@@ -118,6 +123,10 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
             running = false;
             break;
         }
+
+        // Start de klok vlak voor het versturen.
+        sendTimeUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
 
         if (send(clientSock, antwoord.c_str(), static_cast<int>(antwoord.size()), 0) == SOCKET_ERROR) {
             std::cerr << "send error!\n";
