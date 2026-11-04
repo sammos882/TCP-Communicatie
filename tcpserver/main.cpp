@@ -1,4 +1,5 @@
 #include <iostream>
+#include <chrono>
 #include <cstring>
 #include <string>
 #include <atomic>
@@ -47,8 +48,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 
     // Zet de socket klaar om inkomende TCP-verbindingen te ontvangen.
     std::cout << "TCP Server listening on port " << PORT << "...\n";
-    
-    if(listen(serverSock, BACKLOG) == SOCKET_ERROR) {
+
+    if (listen(serverSock, BACKLOG) == SOCKET_ERROR) {
         closeSocket(serverSock);
         std::cerr << "listen error!\n";
         throw std::runtime_error("listen error!");
@@ -68,6 +69,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     // Deze thread ontvangt berichten van de client.
     std::thread receiver([&]() {
         char buffer[BUF_SIZE];
+        std::chrono::steady_clock::time_point previousSendTime{};
+        bool hasPreviousSend = false;
 
         while (running) {
             int bytes = recv(clientSock, buffer, sizeof(buffer) - 1, 0);
@@ -80,6 +83,19 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
             buffer[bytes] = '\0';
             buffer[strcspn(buffer, "\r\n")] = '\0';
             std::cout << "Client: " << buffer << '\n';
+            const auto sendTime = std::chrono::steady_clock::now();
+            const auto delayMs = hasPreviousSend
+                ? std::chrono::duration_cast<std::chrono::milliseconds>(sendTime - previousSendTime).count()
+                : 0;
+            std::string comfromatiebericht = "Ontvangen bericht op server: " + std::string(buffer)
+                + " (" + std::to_string(delayMs) + " ms)";
+            if (send(clientSock, comfromatiebericht.c_str(), static_cast<int>(comfromatiebericht.size()), 0) == SOCKET_ERROR) {
+                std::cerr << "send error!\n";
+                running = false;
+                break;
+            }
+            previousSendTime = sendTime;
+            hasPreviousSend = true;
 
             if (strcmp(buffer, "stop") == 0) {
                 running = false;
@@ -92,7 +108,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 #else
         shutdown(clientSock, SHUT_RDWR);
 #endif
-    });
+        });
 
     // De hoofdthread leest berichten van het toetsenbord en verstuurt ze.
     std::string antwoord;

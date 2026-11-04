@@ -2,6 +2,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <thread>
+#include <chrono>
 #include "log.hpp"
 #include "socket.hpp"
 #include <string>
@@ -45,7 +46,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     // Maak verbinding met de server op het ingestelde adres en de ingestelde poort.
     if (connect(sock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
         throw std::runtime_error("connect failed");
-        std::cerr << "connect failed\n"; 
+        std::cerr << "connect failed\n";
         return 1;
     }
     // Deze thread blijft ontvangen terwijl de hoofdthread invoer leest en verstuurt.
@@ -54,7 +55,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         int bytes = 0;
 
         while ((bytes = recv(sock, buffer, sizeof(buffer), 0)) > 0) {
-            std::cout << "\nOntvangen van server: ";
+            std::cout << "\nserver: ";
+            std::string comfromatiebericht = "Ontvangen bericht op client:" + std::string(buffer);
+            send(sock, comfromatiebericht.c_str(), static_cast<int>(comfromatiebericht.size()), 0);
             std::cout.write(buffer, bytes);
             std::cout << '\n';
         }
@@ -62,10 +65,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         if (bytes == SOCKET_ERROR) {
             std::cerr << "Fout bij ontvangen van de server.\n";
         }
-    });
+        });
 
     // De hoofdthread leest berichten van de gebruiker en verstuurt ze.
     std::string outgoingMessage;
+    std::chrono::steady_clock::time_point previousSendTime;
+    bool hasPreviousMessage = false;
     while (true) {
         std::cout << "Bericht (typ stop om te stoppen):\n";
         if (!std::getline(std::cin, outgoingMessage) || outgoingMessage == "stop") {
@@ -76,6 +81,14 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
             std::cerr << "Fout bij versturen naar de server.\n";
             break;
         }
+
+        const auto sendTime = std::chrono::steady_clock::now();
+        if (hasPreviousMessage) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(sendTime - previousSendTime);
+            std::cout << "Tijd sinds vorig verzonden bericht: " << elapsed.count() << " ms\n";
+        }
+        previousSendTime = sendTime;
+        hasPreviousMessage = true;
     }
 
     // Stop beide socketrichtingen zodat recv() in de receiver-thread wordt vrijgegeven.
