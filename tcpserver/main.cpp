@@ -1,0 +1,136 @@
+#include <iostream>
+#include <cstring>
+#include <string>
+#include <atomic>
+#include <thread>
+#include "log.hpp"
+#include "socket.hpp"
+
+// Instellingen voor de server.
+#define PORT 8080
+#define BUF_SIZE 1024
+constexpr int BACKLOG = 5; // Maximaal aantal verbindingen dat in de wachtrij mag staan.
+
+int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
+    // Toon informatie over de server en het moment waarop deze is gecompileerd.
+    std::cout << "TCP Server!\n";
+    std::cout << __DATE__ << " " << __TIME__ << std::endl; // log date and time of compilation, not runtime
+    LogTargetOperatingSystem();
+    LogTargetCompiler();
+#ifdef _WIN32
+    // Initialiseer de Windows Sockets-bibliotheek op Windows.
+    WSADATA wsaData;
+    (void)WSAStartup(MAKEWORD(2, 2), &wsaData);
+#endif
+
+    // Maak een TCP-socket aan voor IPv4.
+    SOCKET serverSock = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSock == INVALID_SOCKET) {
+        std::cerr << "Cannot create socket!\n";
+        throw std::runtime_error("Cannot create socket");
+        return 1;
+    }
+
+    // Stel het adres en de poort in waarop de server verbindingen accepteert.
+    sockaddr_in serverAddr{};
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(PORT);
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+
+    // Koppel de socket aan het ingestelde adres en de poort.
+    if (bind(serverSock, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
+        closeSocket(serverSock);
+        std::cerr << "Cannot bind socket\n";
+        throw std::runtime_error("Cannot bind socket");
+        return 1;
+    }
+
+    // Zet de socket klaar om inkomende TCP-verbindingen te ontvangen.
+    std::cout << "TCP Server listening on port " << PORT << "...\n";
+    
+    if(listen(serverSock, BACKLOG) == SOCKET_ERROR) {
+        closeSocket(serverSock);
+        std::cerr << "listen error!\n";
+        throw std::runtime_error("listen error!");
+        return 1;
+    }
+
+    // Wacht op één client en maak daarvoor een aparte socket.
+    SOCKET clientSock = accept(serverSock, nullptr, nullptr);
+    if (clientSock == INVALID_SOCKET) {
+        std::cerr << "accept error!\n";
+        throw std::runtime_error("accept error!");
+        return 1;
+    }
+
+    std::atomic<bool> running = true;
+
+    // Deze thread ontvangt berichten van de client.
+    std::thread receiver([&]() {
+        char buffer[BUF_SIZE];
+
+        while (running) {
+            int bytes = recv(clientSock, buffer, sizeof(buffer) - 1, 0);
+            if (bytes <= 0) {
+                std::cout << "De client heeft de verbinding gesloten.\n";
+                running = false;
+                break;
+            }
+
+            buffer[bytes] = '\0';
+            buffer[strcspn(buffer, "\r\n")] = '\0';
+            std::cout << "Client: " << buffer << '\n';
+
+            if (strcmp(buffer, "stop") == 0) {
+                running = false;
+                break;
+            }
+        }
+
+#ifdef _WIN32
+        shutdown(clientSock, SD_BOTH);
+#else
+        shutdown(clientSock, SHUT_RDWR);
+#endif
+    });
+
+    // De hoofdthread leest berichten van het toetsenbord en verstuurt ze.
+    std::string antwoord;
+    while (running) {
+        std::cout << "server: ";
+        if (!std::getline(std::cin, antwoord) || !running) {
+            running = false;
+            break;
+        }
+
+        if (send(clientSock, antwoord.c_str(), static_cast<int>(antwoord.size()), 0) == SOCKET_ERROR) {
+            std::cerr << "send error!\n";
+            running = false;
+            break;
+        }
+
+        if (antwoord == "stop") {
+            running = false;
+            break;
+        }
+    }
+
+#ifdef _WIN32
+    shutdown(clientSock, SD_BOTH);
+#else
+    shutdown(clientSock, SHUT_RDWR);
+#endif
+    receiver.join();
+
+    // Sluit de verbinding met de client en daarna de server-socket.
+    closeSocket(clientSock);
+    closeSocket(serverSock);
+
+#ifdef _WIN32
+    // Ruim de Windows Sockets-bibliotheek op.
+    (void)WSACleanup();
+#endif
+
+    // Geef aan dat het programma succesvol is afgerond.
+    return 0;
+}
