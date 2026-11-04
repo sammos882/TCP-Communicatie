@@ -33,6 +33,7 @@
 
 # Visual Studio
 .vs/
+.x64/
 *.suo
 *.user
 *.userosscache
