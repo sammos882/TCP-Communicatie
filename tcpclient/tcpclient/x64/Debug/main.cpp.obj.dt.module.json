@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "revision": 0,
+    "rules": [
+        {
+            "primary-output": "tcpclient\\x64\\Debug\\main.obj",
+            "outputs": [
+                "tcpclient\\x64\\Debug\\main.cpp.obj.dt.module.json",
+                "tcpclient\\x64\\Debug\\main.cpp.obj.dt.d.json"
+            ],
+            "requires": []
+        }
+    ]
+}

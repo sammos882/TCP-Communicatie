@@ -10,7 +10,7 @@
 // Instellingen voor de verbinding met de server.
 #define PORT 8080
 #define BUF_SIZE 1024
-#define IP_ADDRESS "127.0.0.1"  // Het loopback-adres verwijst naar deze computer.
+#define IP_ADDRESS "192.168.1.66"  // Het loopback-adres verwijst naar deze computer.
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     std::cout << "TCP Client!\n";
@@ -93,7 +93,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         if (!std::getline(std::cin, outgoingMessage) || outgoingMessage == "stop") {
             break;
         }
-
         // Start de klok vlak voor het versturen.
         sendTimeUs = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
