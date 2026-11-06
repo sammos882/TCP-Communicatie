@@ -90,7 +90,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
                 const long long nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     receiveTime.time_since_epoch()).count();
                 const double delayMs = (nowUs - sendTimeUs.load()) / 1000.0;
-                std::cout << "\nDelay (heen en terug): " << delayMs << " ms\n";
+                std::cout << "\nBevestigd: " << buffer << "\nDelay (heen en terug): " << delayMs << " ms\n";
                 continue; // een confirmatie bevestigen we niet opnieuw
             }
 
@@ -117,6 +117,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 
     // De hoofdthread leest berichten van het toetsenbord en verstuurt ze.
     std::string antwoord;
+    int messageId = 0;
     while (running) {
         std::cout << "server: ";
         if (!std::getline(std::cin, antwoord) || !running) {
@@ -127,8 +128,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         // Start de klok vlak voor het versturen.
         sendTimeUs = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
+        // Geef het bericht een uniek ID en laat het zien voor het versturen.
+        messageId++;
+        std::string metId = "[S-" + std::to_string(messageId) + "] " + antwoord;
+        std::cout << "Verstuur: " << metId << '\n';
 
-        if (send(clientSock, antwoord.c_str(), static_cast<int>(antwoord.size()), 0) == SOCKET_ERROR) {
+        if (send(clientSock, metId.c_str(), static_cast<int>(metId.size()), 0) == SOCKET_ERROR) {
             std::cerr << "send error!\n";
             running = false;
             break;
