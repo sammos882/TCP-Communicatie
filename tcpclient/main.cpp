@@ -11,7 +11,7 @@
 // Instellingen voor de verbinding met de server.
 #define PORT 8080
 #define BUF_SIZE 1024
-#define IP_ADDRESS "192.168.1.66"  // Het loopback-adres verwijst naar deze computer.
+#define IP_ADDRESS "145.49.9.68"  // Het loopback-adres verwijst naar deze computer.
 #define TEST_COUNT 100          // Aantal berichten bij het commando "test".
 
 // Huidige tijd in microseconden.
